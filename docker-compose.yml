@@ -1,0 +1,77 @@
+# Wattsnet Productivity Services
+# Print servers and productivity tools
+
+services:
+  # CUPS Print Server - Network printing service
+  cups:
+    image: olbat/cupsd:latest
+    container_name: cups
+    restart: unless-stopped
+    ports:
+      - "631:631"  # CUPS web interface
+    environment:
+      - CUPS_ADMIN_USER=${CUPS_USER:-admin}
+      - CUPS_ADMIN_PASSWORD=${CUPS_PASSWORD:-changeme}
+      - TZ=${TZ:-America/New_York}
+    volumes:
+      - ./cups/config:/etc/cups
+      - ./cups/log:/var/log/cups
+      - ./cups/spool:/var/spool/cups
+      - /var/run/dbus:/var/run/dbus  # For printer detection
+    devices:
+      # Allow USB printer access (optional)
+      - /dev/bus/usb:/dev/bus/usb
+    networks:
+      - homelab
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cups.rule=Host(`cups.wattslabs.dev`)"
+      - "traefik.http.routers.cups.entrypoints=web"
+      - "traefik.http.services.cups.loadbalancer.server.port=631"
+    cap_add:
+      - SYS_ADMIN  # Required for printer management
+
+  # Thermal Print Server - For receipt/label printing
+  thermal-print-server:
+    build: ./thermal-printer
+    container_name: thermal-printer
+    restart: unless-stopped
+    ports:
+      - "9100:9100"  # Raw printing port
+      - "3010:3010"  # Web API
+    environment:
+      - PRINTER_IP=${THERMAL_PRINTER_IP:-192.168.0.60}
+      - PRINTER_PORT=${THERMAL_PRINTER_PORT:-9100}
+      - API_PORT=3010
+      - TZ=${TZ:-America/New_York}
+      - ENABLE_WEB_UI=${ENABLE_WEB_UI:-true}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ./thermal-printer/config:/app/config
+      - ./thermal-printer/templates:/app/templates
+      - ./thermal-printer/logs:/app/logs
+      - ./thermal-printer/queue:/app/queue
+    networks:
+      - homelab
+    extra_hosts:
+      - "thermal-printer:${THERMAL_PRINTER_IP:-192.168.0.60}"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.thermal.rule=Host(`thermal.wattslabs.dev`)"
+      - "traefik.http.routers.thermal.entrypoints=web"
+      - "traefik.http.services.thermal.loadbalancer.server.port=3010"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  homelab:
+    external: true
+
+volumes:
+  cups_config:
+    driver: local
+  cups_spool:
+    driver: local
